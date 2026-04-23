@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmoSense — Real-Time Emotion Detection</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07080f;
+    --bg2: #0d0e1c;
+    --bg3: #12142a;
+    --surface: #1a1c35;
+    --border: rgba(255,255,255,0.06);
+    --border-glow: rgba(124,107,255,0.3);
+    --accent: #7c6bff;
+    --accent2: #00e5ff;
+    --text: #e8e9f5;
+    --muted: #6b7280;
+    --angry: #ff4d4d;
+    --disgust: #a3e635;
+    --fear: #a855f7;
+    --happy: #ffd166;
+    --sad: #4a9eff;
+    --surprise: #ff9f1c;
+    --neutral: #94a3b8;
+    --font: 'Space Grotesk', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Animated background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 60% at 20% -10%, rgba(124,107,255,0.08) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 50% at 80% 110%, rgba(0,229,255,0.05) 0%, transparent 60%);
+    pointer-events: none; z-index: 0;
+  }
+
+  /* ── Layout ── */
+  .app {
+    position: relative; z-index: 1;
+    max-width: 1280px; margin: 0 auto;
+    padding: 0 1.5rem 3rem;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 1.5rem 0 1rem;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 2rem;
+  }
+
+  .logo {
+    display: flex; align-items: center; gap: 12px;
+  }
+
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+
+  .logo-text h1 {
+    font-size: 1.4rem; font-weight: 700;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .logo-text p {
+    font-size: 0.7rem; color: var(--muted);
+    letter-spacing: 0.15em; text-transform: uppercase;
+    font-family: var(--mono);
+  }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 0.78rem; font-family: var(--mono); color: var(--muted);
+  }
+
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+
+  .status-dot.live { background: #22c55e; box-shadow: 0 0 8px #22c55e; animation: pulse-dot 2s infinite; }
+  .status-dot.error { background: #ef4444; }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* ── Main grid ── */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 1.5rem;
+    align-items: start;
+  }
+
+  @media (max-width: 900px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  /* ── Camera panel ── */
+  .camera-panel {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .camera-panel.active {
+    border-color: var(--border-glow);
+    box-shadow: 0 0 30px rgba(124,107,255,0.08), inset 0 0 30px rgba(124,107,255,0.03);
+  }
+
+  .camera-wrap {
+    position: relative;
+    aspect-ratio: 4/3;
+    background: #05060d;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  #video {
+    width: 100%; height: 100%; object-fit: cover;
+    transform: scaleX(-1); /* mirror */
+    display: none;
+  }
+
+  #overlay {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+
+  .cam-placeholder {
+    text-align: center; color: var(--muted);
+    padding: 3rem 2rem;
+  }
+
+  .cam-placeholder .icon { font-size: 3.5rem; margin-bottom: 1rem; opacity: 0.4; }
+  .cam-placeholder h3 { font-size: 1.1rem; margin-bottom: 0.5rem; font-weight: 500; }
+  .cam-placeholder p { font-size: 0.85rem; opacity: 0.6; }
+
+  .camera-controls {
+    padding: 1rem 1.25rem;
+    display: flex; gap: 10px; align-items: center;
+    border-top: 1px solid var(--border);
+  }
+
+  .btn {
+    cursor: pointer; border: none; outline: none;
+    font-family: var(--font); font-size: 0.85rem; font-weight: 500;
+    border-radius: 8px; padding: 8px 18px;
+    transition: all 0.2s;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover { background: #9181ff; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .btn-secondary {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: rgba(255,255,255,0.15); background: #1f2040; }
+
+  .btn-danger {
+    background: rgba(239,68,68,0.15);
+    color: #f87171;
+    border: 1px solid rgba(239,68,68,0.3);
+  }
+  .btn-danger:hover { background: rgba(239,68,68,0.25); }
+
+  .fps-badge {
+    margin-left: auto;
+    font-size: 0.72rem; font-family: var(--mono);
+    color: var(--muted); padding: 4px 10px;
+    background: var(--bg3); border-radius: 6px;
+  }
+
+  /* ── Face detection boxes on canvas ── */
+  /* drawn via canvas overlay */
+
+  /* ── Side panel ── */
+  .side-panel {
+    display: flex; flex-direction: column; gap: 1.25rem;
+  }
+
+  /* ── Card ── */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem;
+  }
+
+  .card-title {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.15em;
+    color: var(--muted); margin-bottom: 1rem;
+    font-family: var(--mono);
+  }
+
+  /* ── Primary emotion display ── */
+  .emotion-display {
+    text-align: center; padding: 0.5rem 0 1rem;
+  }
+
+  .emotion-emoji {
+    font-size: 3.5rem;
+    display: block; margin-bottom: 0.5rem;
+    filter: drop-shadow(0 0 12px currentColor);
+    transition: all 0.3s ease;
+  }
+
+  .emotion-name {
+    font-size: 1.8rem; font-weight: 700;
+    transition: color 0.3s;
+    letter-spacing: -0.02em;
+  }
+
+  .emotion-conf {
+    font-size: 0.85rem; color: var(--muted);
+    margin-top: 4px; font-family: var(--mono);
+  }
+
+  .no-face {
+    text-align: center; color: var(--muted);
+    font-size: 0.88rem; padding: 1rem 0;
+  }
+
+  /* ── Emotion bars ── */
+  .emotion-bars { display: flex; flex-direction: column; gap: 8px; }
+
+  .bar-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+
+  .bar-label {
+    width: 70px; font-size: 0.78rem; color: var(--muted);
+    font-family: var(--mono); flex-shrink: 0;
+  }
+
+  .bar-track {
+    flex: 1; height: 6px;
+    background: var(--bg3);
+    border-radius: 3px; overflow: hidden;
+  }
+
+  .bar-fill {
+    height: 100%; border-radius: 3px;
+    transition: width 0.25s ease;
+    width: 0%;
+  }
+
+  .bar-val {
+    width: 42px; text-align: right;
+    font-size: 0.72rem; color: var(--muted);
+    font-family: var(--mono); flex-shrink: 0;
+  }
+
+  /* ── History ── */
+  .history-row {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    min-height: 36px;
+  }
+
+  .history-chip {
+    padding: 4px 10px; border-radius: 100px;
+    font-size: 0.72rem; font-family: var(--mono);
+    background: var(--surface); color: var(--muted);
+    border: 1px solid var(--border);
+    animation: chip-in 0.2s ease;
+  }
+
+  @keyframes chip-in {
+    from { opacity: 0; transform: scale(0.85); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* ── Stats ── */
+  .stats-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .stat-card {
+    background: var(--bg3);
+    border-radius: 10px; padding: 12px;
+  }
+
+  .stat-val {
+    font-size: 1.4rem; font-weight: 700;
+    font-family: var(--mono);
+  }
+
+  .stat-label {
+    font-size: 0.68rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.1em;
+    margin-top: 2px;
+  }
+
+  /* ── Setup banner ── */
+  .setup-banner {
+    background: linear-gradient(135deg, rgba(124,107,255,0.08), rgba(0,229,255,0.05));
+    border: 1px solid rgba(124,107,255,0.2);
+    border-radius: 14px;
+    padding: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .setup-banner h3 {
+    font-size: 0.95rem; font-weight: 600; margin-bottom: 0.75rem;
+    color: var(--accent2);
+  }
+
+  .setup-steps {
+    list-style: none; counter-reset: steps;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+
+  .setup-steps li {
+    counter-increment: steps;
+    display: flex; gap: 10px; align-items: flex-start;
+    font-size: 0.82rem; color: rgba(232,233,245,0.8); line-height: 1.5;
+  }
+
+  .setup-steps li::before {
+    content: counter(steps);
+    min-width: 22px; height: 22px;
+    background: var(--accent); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.7rem; font-weight: 700;
+    flex-shrink: 0; margin-top: 1px;
+  }
+
+  code {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 4px;
+    font-family: var(--mono); font-size: 0.8rem;
+    color: var(--accent2);
+  }
+
+  /* ── Model mode toggle ── */
+  .mode-row {
+    display: flex; gap: 6px; margin-bottom: 1rem;
+  }
+
+  .mode-btn {
+    flex: 1; padding: 7px; border-radius: 7px;
+    font-size: 0.75rem; font-family: var(--mono);
+    cursor: pointer; transition: all 0.2s;
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .mode-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  /* ── Scanning animation ── */
+  .scan-line {
+    position: absolute; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent2), transparent);
+    opacity: 0;
+    animation: none;
+    pointer-events: none;
+  }
+
+  .scanning .scan-line {
+    opacity: 0.6;
+    animation: scan 2s linear infinite;
+  }
+
+  @keyframes scan {
+    from { top: 0; }
+    to   { top: 100%; }
+  }
+
+  /* ── Corner decorations ── */
+  .corner {
+    position: absolute; width: 18px; height: 18px;
+    pointer-events: none; opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  .camera-panel.active .corner { opacity: 1; }
+
+  .corner-tl { top: 8px; left: 8px;
+    border-top: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .corner-tr { top: 8px; right: 8px;
+    border-top: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+  .corner-bl { bottom: 48px; left: 8px;
+    border-bottom: 2px solid var(--accent); border-left: 2px solid var(--accent); }
+  .corner-br { bottom: 48px; right: 8px;
+    border-bottom: 2px solid var(--accent); border-right: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">🧠</div>
+      <div class="logo-text">
+        <h1>EmoSense</h1>
+        <p>FER2013 · CNN · Real-Time</p>
+      </div>
+    </div>
+    <div class="status-pill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Idle</span>
+    </div>
+  </header>
+
+  <!-- Setup Banner -->
+  <div class="setup-banner" id="setupBanner">
+    <h3>⚡ Quick Setup Guide</h3>
+    <ol class="setup-steps">
+      <li>Download the <strong>FER2013</strong> dataset from Kaggle → place <code>fer2013.csv</code> in the <code>data/</code> folder</li>
+      <li>Install dependencies: <code>pip install -r requirements.txt</code></li>
+      <li>Train the model: <code>python train_model.py</code> — takes ~30–60 min on GPU</li>
+      <li>Start the server: <code>python app.py</code> — then open <code>http://localhost:5000</code></li>
+      <li>Click <strong>Start Camera</strong> below — allow webcam access and see your emotions live!</li>
+    </ol>
+  </div>
+
+  <div class="main-grid">
+    <!-- Camera panel -->
+    <div class="camera-panel" id="cameraPanel">
+      <div class="camera-wrap" id="cameraWrap">
+        <div class="scan-line" id="scanLine"></div>
+        <div class="corner corner-tl"></div>
+        <div class="corner corner-tr"></div>
+        <div class="corner corner-bl"></div>
+        <div class="corner corner-br"></div>
+
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+
+        <div class="cam-placeholder" id="placeholder">
+          <div class="icon">📷</div>
+          <h3>Camera not started</h3>
+          <p>Click "Start Camera" to begin real-time emotion detection</p>
+        </div>
+      </div>
+
+      <div class="camera-controls">
+        <button class="btn btn-primary" id="btnStart" onclick="startCamera()">▶ Start Camera</button>
+        <button class="btn btn-danger" id="btnStop" onclick="stopCamera()" style="display:none">■ Stop</button>
+        <button class="btn btn-secondary" onclick="captureSnapshot()">📸 Snapshot</button>
+        <div class="fps-badge" id="fpsBadge">— FPS</div>
+      </div>
+    </div>
+
+    <!-- Side panel -->
+    <div class="side-panel">
+
+      <!-- Inference mode -->
+      <div class="card">
+        <div class="card-title">Detection Mode</div>
+        <div class="mode-row">
+          <button class="mode-btn active" id="modeServer" onclick="setMode('server')">🌐 Server</button>
+          <button class="mode-btn" id="modeBrowser" onclick="setMode('browser')">⚡ Browser (Demo)</button>
+        </div>
+        <p style="font-size:0.75rem; color:var(--muted); line-height:1.5;">
+          <strong>Server</strong>: sends frames to <code>localhost:5000</code> — requires Flask + trained model.<br>
+          <strong>Browser Demo</strong>: simulates predictions locally (no model needed).
+        </p>
+      </div>
+
+      <!-- Primary emotion -->
+      <div class="card" id="emotionCard">
+        <div class="card-title">Detected Emotion</div>
+        <div id="emotionDisplay" class="no-face">No face detected</div>
+      </div>
+
+      <!-- Bars -->
+      <div class="card">
+        <div class="card-title">Confidence Scores</div>
+        <div class="emotion-bars" id="emotionBars">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="card">
+        <div class="card-title">Recent Emotions</div>
+        <div class="history-row" id="historyRow">
+          <span style="font-size:0.78rem; color:var(--muted);">Waiting for detection…</span>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="card">
+        <div class="card-title">Session Stats</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-val" id="statFrames">0</div>
+            <div class="stat-label">Frames</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="statFaces">0</div>
+            <div class="stat-label">Faces</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="statTopEmo">—</div>
+            <div class="stat-label">Top Emotion</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-val" id="statAvgConf">—</div>
+            <div class="stat-label">Avg Conf</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+const EMOTIONS = ['Angry','Disgust','Fear','Happy','Sad','Surprise','Neutral'];
+const EMOTION_COLORS = {
+  Angry:'#ff4d4d', Disgust:'#a3e635', Fear:'#a855f7',
+  Happy:'#ffd166', Sad:'#4a9eff', Surprise:'#ff9f1c', Neutral:'#94a3b8'
+};
+const EMOTION_EMOJIS = {
+  Angry:'😠', Disgust:'🤢', Fear:'😨',
+  Happy:'😊', Sad:'😢', Surprise:'😲', Neutral:'😐'
+};
+
+// ── State
+let stream = null, animFrame = null;
+let detectionMode = 'server';
+let frameCount = 0, faceCount = 0;
+let lastFrameTime = 0, fps = 0;
+let history = [];
+let confSum = 0, confN = 0;
+let emotionCounts = {};
+let isProcessing = false;
+const FRAME_INTERVAL = 120; // ms between inferences
+
+// ── DOM refs
+const video = document.getElementById('video');
+const overlay = document.getElementById('overlay');
+const ctx = overlay.getContext('2d');
+const placeholder = document.getElementById('placeholder');
+const cameraPanel = document.getElementById('cameraPanel');
+const cameraWrap = document.getElementById('cameraWrap');
+
+// ── Init bars
+function initBars() {
+  const container = document.getElementById('emotionBars');
+  container.innerHTML = EMOTIONS.map(e => `
+    <div class="bar-row">
+      <span class="bar-label">${e}</span>
+      <div class="bar-track">
+        <div class="bar-fill" id="bar-${e}" style="background:${EMOTION_COLORS[e]}; width:0%"></div>
+      </div>
+      <span class="bar-val" id="barVal-${e}">0%</span>
+    </div>
+  `).join('');
+}
+initBars();
+
+// ── Camera
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width:640, height:480, facingMode:'user' }, audio:false });
+    video.srcObject = stream;
+    video.style.display = 'block';
+    placeholder.style.display = 'none';
+    document.getElementById('btnStart').style.display = 'none';
+    document.getElementById('btnStop').style.display = 'inline-block';
+    cameraPanel.classList.add('active');
+    cameraWrap.classList.add('scanning');
+    setStatus('live', 'Live');
+    animFrame = requestAnimationFrame(loop);
+  } catch(e) {
+    setStatus('error', 'Camera denied');
+    alert('Could not access camera: ' + e.message);
+  }
+}
+
+function stopCamera() {
+  if(stream) stream.getTracks().forEach(t => t.stop());
+  if(animFrame) cancelAnimationFrame(animFrame);
+  video.style.display = 'none';
+  placeholder.style.display = 'flex';
+  document.getElementById('btnStart').style.display = 'inline-block';
+  document.getElementById('btnStop').style.display = 'none';
+  cameraPanel.classList.remove('active');
+  cameraWrap.classList.remove('scanning');
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  setStatus('', 'Idle');
+  stream = null;
+}
+
+// ── Main render loop
+let lastInferenceTime = 0;
+function loop(ts) {
+  animFrame = requestAnimationFrame(loop);
+
+  // Sync overlay size
+  if(overlay.width !== video.videoWidth || overlay.height !== video.videoHeight) {
+    overlay.width = video.videoWidth || 640;
+    overlay.height = video.videoHeight || 480;
+  }
+
+  // FPS
+  if(lastFrameTime) fps = Math.round(1000 / (ts - lastFrameTime));
+  lastFrameTime = ts;
+  document.getElementById('fpsBadge').textContent = fps + ' FPS';
+
+  frameCount++;
+  document.getElementById('statFrames').textContent = frameCount;
+
+  // Inference throttle
+  if(!isProcessing && ts - lastInferenceTime > FRAME_INTERVAL) {
+    lastInferenceTime = ts;
+    runInference();
+  }
+}
+
+async function runInference() {
+  if(!video.videoWidth) return;
+  isProcessing = true;
+
+  try {
+    if(detectionMode === 'server') {
+      await serverInference();
+    } else {
+      browserDemoInference();
+    }
+  } catch(e) {
+    console.warn('Inference error:', e);
+  }
+  isProcessing = false;
+}
+
+// ── Server inference
+async function serverInference() {
+  const canvas = document.createElement('canvas');
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  const c = canvas.getContext('2d');
+  c.drawImage(video, 0, 0);
+  const dataURL = canvas.toDataURL('image/jpeg', 0.7);
+
+  const res = await fetch('http://localhost:5000/predict', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({image: dataURL})
+  });
+  if(!res.ok) throw new Error('Server error');
+  const data = await res.json();
+  if(data.error) throw new Error(data.error);
+  renderDetections(data.detections);
+}
+
+// ── Browser demo — simulates plausible predictions
+let demoEmotion = 'Happy';
+let demoTimer = 0;
+function browserDemoInference() {
+  demoTimer++;
+  if(demoTimer % 25 === 0) {
+    demoEmotion = EMOTIONS[Math.floor(Math.random() * EMOTIONS.length)];
+  }
+
+  const scores = {};
+  let remaining = 1.0;
+  const shuffled = [...EMOTIONS].sort(() => Math.random() - 0.5);
+  shuffled.forEach((e, i) => {
+    if(i === shuffled.length - 1) { scores[e] = remaining; return; }
+    const isMain = e === demoEmotion;
+    const base = isMain ? 0.4 + Math.random() * 0.35 : Math.random() * 0.08;
+    const val = Math.min(base, remaining);
+    scores[e] = val; remaining -= val;
+  });
+
+  // Normalize
+  const total = Object.values(scores).reduce((a,b) => a+b, 0);
+  Object.keys(scores).forEach(k => scores[k] /= total);
+
+  const sorted = Object.entries(scores).sort((a,b) => b[1]-a[1]);
+  const top = sorted[0];
+
+  const fakeDetection = {
+    x: Math.round(overlay.width * 0.25),
+    y: Math.round(overlay.height * 0.1),
+    w: Math.round(overlay.width * 0.5),
+    h: Math.round(overlay.height * 0.75),
+    emotion: top[0],
+    emoji: EMOTION_EMOJIS[top[0]],
+    color: EMOTION_COLORS[top[0]],
+    confidence: Math.round(top[1] * 100),
+    scores: sorted.map(([e,v]) => [e, Math.round(v*1000)/10])
+  };
+  renderDetections([fakeDetection]);
+}
+
+// ── Render detections on canvas + UI
+function renderDetections(detections) {
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  if(!detections || detections.length === 0) {
+    document.getElementById('emotionDisplay').innerHTML = '<div class="no-face">No face detected</div>';
+    updateBars(null);
+    return;
+  }
+
+  faceCount += detections.length;
+  document.getElementById('statFaces').textContent = faceCount;
+
+  detections.forEach(det => {
+    const { x, y, w, h, emotion, color, confidence, emoji, scores } = det;
+
+    // Flip x for mirror
+    const fx = overlay.width - x - w;
+
+    // Box
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.strokeRect(fx, y, w, h);
+    ctx.shadowBlur = 0;
+
+    // Label background
+    const label = `${emoji} ${emotion}  ${confidence}%`;
+    ctx.font = 'bold 14px "Space Grotesk", sans-serif';
+    const tw = ctx.measureText(label).width;
+    const lx = fx, ly = y - 32;
+
+    ctx.fillStyle = color + 'cc';
+    ctx.beginPath();
+    ctx.roundRect(lx - 4, ly, tw + 16, 28, 6);
+    ctx.fill();
+
+    // Label text
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, lx + 4, ly + 18);
+
+    // Update side panel with first face
+    updateEmotionDisplay(emotion, emoji, color, confidence);
+    updateBars(scores);
+    addToHistory(emotion, color);
+    updateStats(emotion, confidence);
+  });
+}
+
+function updateEmotionDisplay(emotion, emoji, color, confidence) {
+  document.getElementById('emotionDisplay').innerHTML = `
+    <div class="emotion-display">
+      <span class="emotion-emoji">${emoji}</span>
+      <div class="emotion-name" style="color:${color}">${emotion}</div>
+      <div class="emotion-conf">${confidence}% confidence</div>
+    </div>
+  `;
+}
+
+function updateBars(scores) {
+  if(!scores) {
+    EMOTIONS.forEach(e => {
+      const bar = document.getElementById('bar-' + e);
+      const val = document.getElementById('barVal-' + e);
+      if(bar) bar.style.width = '0%';
+      if(val) val.textContent = '0%';
+    });
+    return;
+  }
+
+  scores.forEach(([e, v]) => {
+    const bar = document.getElementById('bar-' + e);
+    const val = document.getElementById('barVal-' + e);
+    if(bar) bar.style.width = v + '%';
+    if(val) val.textContent = v + '%';
+  });
+}
+
+function addToHistory(emotion, color) {
+  history.unshift({ emotion, color });
+  if(history.length > 10) history.pop();
+
+  const row = document.getElementById('historyRow');
+  row.innerHTML = history.map(h =>
+    `<span class="history-chip" style="color:${h.color}; border-color:${h.color}44">${EMOTION_EMOJIS[h.emotion]} ${h.emotion}</span>`
+  ).join('');
+}
+
+function updateStats(emotion, confidence) {
+  emotionCounts[emotion] = (emotionCounts[emotion] || 0) + 1;
+  confSum += confidence; confN++;
+
+  const topEmo = Object.entries(emotionCounts).sort((a,b) => b[1]-a[1])[0][0];
+  document.getElementById('statTopEmo').textContent = topEmo;
+  document.getElementById('statAvgConf').textContent = Math.round(confSum/confN) + '%';
+}
+
+function setStatus(type, text) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  dot.className = 'status-dot' + (type ? ' ' + type : '');
+  txt.textContent = text;
+}
+
+function setMode(mode) {
+  detectionMode = mode;
+  document.getElementById('modeServer').classList.toggle('active', mode === 'server');
+  document.getElementById('modeBrowser').classList.toggle('active', mode === 'browser');
+}
+
+function captureSnapshot() {
+  if(!video.videoWidth) return alert('Start the camera first!');
+  const c = document.createElement('canvas');
+  c.width = video.videoWidth; c.height = video.videoHeight;
+  const cx = c.getContext('2d');
+  cx.drawImage(video, 0, 0);
+  cx.drawImage(overlay, 0, 0);
+  const link = document.createElement('a');
+  link.download = `emosense-${Date.now()}.png`;
+  link.href = c.toDataURL();
+  link.click();
+}
+</script>
+</body>
+</html>
